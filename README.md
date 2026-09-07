@@ -53,6 +53,7 @@ The DS1302 module must be powered from 3.3 V. Its trickle charger is explicitly 
 - A countdown timer can turn the lamp on or off after 1–1440 minutes.
 - The daily schedule can turn the lamp on and off at selected local times.
 - Schedule settings are saved in flash and survive restarts. Countdown timers restart from zero when the device reboots.
+- Brightness, power state, and the last non-off color mode are saved in flash. After a reboot the lamp starts off, then restores the previous on state after a three-second safety delay. A lamp that was off remains off.
 - When an automation turns the lamp on, it restores the most recently selected warm, balanced, or cool mode.
 
 ## OTA firmware updates

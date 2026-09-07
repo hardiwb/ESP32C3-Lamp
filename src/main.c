@@ -40,6 +40,7 @@ static uint16_t schedule_off_minute = 22 * 60;
 static int64_t timer_deadline_us;
 static bool timer_turn_on;
 static char resume_mode[5] = "warm";
+static bool restore_on_boot;
 static const char *clock_source = "none";
 
 #define WIFI_CONNECTED_BIT BIT0
@@ -180,30 +181,31 @@ static void pwm_init(void)
 
 static const char INDEX_HTML[] =
     "<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
-    "<title>Desk Lamp</title><style>body{font-family:system-ui,sans-serif;max-width:480px;margin:40px auto;padding:0 20px;background:#f4efe6;color:#25231f}"
-    "main{background:#fffaf2;padding:28px;border:1px solid #ded5c6;border-radius:12px;box-shadow:0 8px 24px #6b59421c}h1{margin-top:0}"
-    "button{font:inherit;border:1px solid #a87945;background:#fff;padding:12px 16px;margin:5px;border-radius:8px;cursor:pointer}"
-    "button.active{background:#a87945;color:white}input,select{font:inherit;box-sizing:border-box;width:100%;padding:8px;accent-color:#a87945}input[type=range]{padding:0}"
-    "section{margin-top:28px;padding-top:18px;border-top:1px solid #ded5c6}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.inline{display:flex;gap:8px;align-items:center}.inline input{width:auto}"
-    "#firmware input{margin:8px 0}#ota-status,#status,#timer-status,#clock{color:#6f665d;margin-top:12px}</style></head>"
-    "<body><main><h1>Desk Lamp</h1><p>Choose the light temperature.</p>"
-    "<div><button data-mode=off>Off</button><button data-mode=warm>Warm</button><button data-mode=mix>Balanced</button><button data-mode=cool>Cool</button></div>"
-    "<label for=brightness>Brightness</label><input id=brightness type=range min=0 max=1023 value=700>"
-    "<p id=status>Loading...</p><section><h2>Clock</h2><p id=clock>Synchronizing...</p></section>"
-    "<section><h2>Timer</h2><div class=row><label>Minutes<input id=timer-minutes type=number min=1 max=1440 value=30></label>"
-    "<label>Action<select id=timer-action><option value=off>Turn off</option><option value=on>Turn on</option></select></label></div>"
-    "<button id=timer-set>Start timer</button><button id=timer-cancel>Cancel</button><p id=timer-status>No active timer</p></section>"
-    "<section><h2>Daily schedule</h2><label class=inline><input id=schedule-enabled type=checkbox> Enabled</label><div class=row>"
+    "<title>Desk Lamp</title><style>*{box-sizing:border-box}body{font-family:system-ui,sans-serif;max-width:1000px;margin:20px auto;padding:0 16px;background:#f4efe6;color:#25231f}"
+    "main{background:#fffaf2;padding:4px 24px;border:1px solid #ded5c6;border-radius:12px;box-shadow:0 8px 24px #6b59421c}.panel{min-width:0;padding:22px 0}.panel+.panel{border-top:1px solid #ded5c6}"
+    "h1,h2{margin:0 0 14px;line-height:1.15}h1{font-size:2rem}h2{font-size:1.55rem}p{margin:10px 0 16px}"
+    "button{font:inherit;border:1px solid #a87945;background:#fff;padding:10px 14px;border-radius:8px;cursor:pointer}button.active{background:#a87945;color:white}"
+    "input,select{font:inherit;width:100%;padding:8px;accent-color:#a87945}input[type=range]{padding:0}.mode-buttons,.actions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}"
+    ".row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.inline{display:flex;gap:8px;align-items:center;margin-bottom:10px}.inline input{width:auto}"
+    "#brightness{margin-top:4px}#firmware input{margin:6px 0 14px}#ota-status,#status,#timer-status,#clock{color:#6f665d}#clock{margin-top:0}"
+    "@media(min-width:800px){main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:32px}.panel:nth-child(2){border-top:0}.panel:nth-child(n+3){border-top:1px solid #ded5c6}}"
+    "@media(max-width:520px){.row{grid-template-columns:1fr}body{margin-top:8px}main{padding:4px 16px}}</style></head>"
+    "<body><main><section class=panel id=lamp-control><h1>Desk Lamp</h1><p>Choose the light temperature.</p>"
+    "<div class=mode-buttons><button data-mode=off>Off</button><button data-mode=warm>Warm</button><button data-mode=mix>Balanced</button><button data-mode=cool>Cool</button></div>"
+    "<label for=brightness>Brightness</label><input id=brightness type=range min=0 max=100 step=5 value=70><p id=status>Loading...</p></section>"
+    "<section class=panel id=schedule><h2>Daily schedule</h2><p id=clock>Synchronizing...</p><label class=inline><input id=schedule-enabled type=checkbox> Enabled</label><div class=row>"
     "<label>Turn on<input id=schedule-on type=time value=07:00></label><label>Turn off<input id=schedule-off type=time value=22:00></label></div>"
-    "<button id=schedule-save>Save schedule</button></section>"
-    "<section id=firmware><h2>Firmware update</h2><p>Select a firmware .bin built for this device.</p>"
-    "<input id=ota-file type=file accept='.bin,application/octet-stream'><button id=ota-button>Install update</button><p id=ota-status></p></section>"
+    "<div class=actions><button id=schedule-save>Save schedule</button></div></section>"
+    "<section class=panel id=timer><h2>Timer</h2><div class=row><label>Minutes<input id=timer-minutes type=number min=1 max=1440 value=30></label>"
+    "<label>Action<select id=timer-action><option value=off>Turn off</option><option value=on>Turn on</option></select></label></div>"
+    "<div class=actions><button id=timer-set>Start timer</button><button id=timer-cancel>Cancel</button></div><p id=timer-status>No active timer</p></section>"
+    "<section class=panel id=firmware><h2>Firmware update</h2><p>Select a firmware .bin built for this device.</p>"
+    "<input id=ota-file type=file accept='.bin,application/octet-stream'><div class=actions><button id=ota-button>Install update</button></div><p id=ota-status></p></section>"
     "</main><script>const status=document.querySelector('#status'),slider=document.querySelector('#brightness'),clock=document.querySelector('#clock'),timerStatus=document.querySelector('#timer-status');"
-    "async function refresh(){let r=await fetch('/api/state'),s=await r.json();slider.value=s.brightness;status.textContent=s.mode+' / '+Math.round(s.brightness/10.23)+'%';document.querySelectorAll('button[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===s.mode))}"
+    "async function refresh(){let r=await fetch('/api/state'),s=await r.json();let percent=Math.round(s.brightness/10.23/5)*5;slider.value=percent;status.textContent=s.mode+' / '+percent+'%';document.querySelectorAll('button[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===s.mode))}"
     "async function update(data){await fetch('/api/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});refresh()}"
-    "let brightnessPending=null,brightnessSending=false;async function updateBrightness(){brightnessPending=Number(slider.value);if(brightnessSending)return;brightnessSending=true;"
-    "try{while(brightnessPending!==null){let value=brightnessPending;brightnessPending=null;await fetch('/api/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brightness:value})})}}finally{brightnessSending=false}refresh()}"
-    "document.querySelectorAll('button[data-mode]').forEach(b=>b.onclick=()=>update({mode:b.dataset.mode}));slider.oninput=updateBrightness;"
+    "document.querySelectorAll('button[data-mode]').forEach(b=>b.onclick=()=>update({mode:b.dataset.mode}));"
+    "slider.oninput=()=>status.textContent='Brightness '+slider.value+'%';slider.onchange=()=>update({brightness:Math.round(Number(slider.value)*10.23)});"
     "let scheduleDirty=false;async function automation(data){await fetch('/api/automation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});await refreshAutomation(true)}"
     "async function refreshAutomation(force=false){try{let r=await fetch('/api/automation'),a=await r.json();clock.textContent=a.synced?a.local_time+' ('+a.timezone+', '+(a.source==='rtc'?'RTC':'internet')+')':'Waiting for RTC or internet time...';"
     "if(force||!scheduleDirty){document.querySelector('#schedule-enabled').checked=a.schedule.enabled;document.querySelector('#schedule-on').value=a.schedule.on;document.querySelector('#schedule-off').value=a.schedule.off}"
@@ -237,6 +239,53 @@ static esp_err_t state_get_handler(httpd_req_t *request)
     xSemaphoreGive(state_lock);
     httpd_resp_set_type(request, "application/json");
     return httpd_resp_send(request, response, HTTPD_RESP_USE_STRLEN);
+}
+
+static void state_load(void)
+{
+    nvs_handle_t handle;
+    if (nvs_open("lamp", NVS_READONLY, &handle) != ESP_OK) return;
+
+    uint16_t saved_brightness;
+    if (nvs_get_u16(handle, "brightness", &saved_brightness) == ESP_OK &&
+        saved_brightness <= LAMP_MAX_DUTY) {
+        master_brightness = saved_brightness;
+    }
+
+    char saved_mode[sizeof(resume_mode)];
+    size_t mode_length = sizeof(saved_mode);
+    if (nvs_get_str(handle, "last_mode", saved_mode, &mode_length) == ESP_OK &&
+        (strcmp(saved_mode, "warm") == 0 || strcmp(saved_mode, "cool") == 0 ||
+         strcmp(saved_mode, "mix") == 0)) {
+        strcpy(resume_mode, saved_mode);
+    }
+    uint8_t saved_power = 0;
+    if (nvs_get_u8(handle, "power_on", &saved_power) == ESP_OK) {
+        restore_on_boot = saved_power != 0;
+    }
+    nvs_close(handle);
+}
+
+static esp_err_t state_save(void)
+{
+    uint16_t brightness;
+    char mode[sizeof(resume_mode)];
+    bool power_on;
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    brightness = master_brightness;
+    strcpy(mode, resume_mode);
+    power_on = strcmp(lamp_mode, "off") != 0;
+    xSemaphoreGive(state_lock);
+
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open("lamp", NVS_READWRITE, &handle);
+    if (result != ESP_OK) return result;
+    result = nvs_set_u16(handle, "brightness", brightness);
+    if (result == ESP_OK) result = nvs_set_str(handle, "last_mode", mode);
+    if (result == ESP_OK) result = nvs_set_u8(handle, "power_on", power_on ? 1 : 0);
+    if (result == ESP_OK) result = nvs_commit(handle);
+    nvs_close(handle);
+    return result;
 }
 
 static esp_err_t state_post_handler(httpd_req_t *request)
@@ -277,6 +326,10 @@ static esp_err_t state_post_handler(httpd_req_t *request)
     }
     if (brightness_changed && !mode_changed) {
         apply_output();
+    }
+    if ((brightness_changed || mode_changed) && state_save() != ESP_OK) {
+        httpd_resp_set_status(request, "500 Internal Server Error");
+        return httpd_resp_sendstr(request, "Could not save lamp state");
     }
     httpd_resp_set_type(request, "application/json");
     return httpd_resp_sendstr(request, "{\"ok\":true}");
@@ -354,6 +407,15 @@ static void turn_on(void)
     strcpy(mode, resume_mode);
     xSemaphoreGive(state_lock);
     set_mode(mode);
+}
+
+static void restore_state_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    turn_on();
+    ESP_LOGI(TAG, "restored saved lamp state after startup delay");
+    vTaskDelete(NULL);
 }
 
 static void automation_task(void *arg)
@@ -667,6 +729,11 @@ void lamp_init(void)
         nvs_result = nvs_flash_init();
     }
     ESP_ERROR_CHECK(nvs_result);
+    state_load();
+    if (restore_on_boot &&
+        xTaskCreate(restore_state_task, "restore_state", 2048, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "could not restore saved lamp state");
+    }
     schedule_load();
     rtc_start();
 
