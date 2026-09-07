@@ -51,8 +51,8 @@ The lamp restores its clock from a DS1302 RTC at startup, then synchronizes from
 The DS1302 module must be powered from 3.3 V. Its trickle charger is explicitly disabled in firmware so the installed non-rechargeable CR2032 is not charged.
 
 - A countdown timer can turn the lamp on or off after 1–1440 minutes.
-- The daily schedule can turn the lamp on and off at selected local times.
-- Schedule settings are saved in flash and survive restarts. Countdown timers restart from zero when the device reboots.
+- Three independent daily schedules can turn the lamp on and off at selected local times. Each schedule can be enabled separately, and overlapping schedules keep the lamp on until the last active period ends.
+- Schedule settings are saved in flash and survive restarts. Existing single-schedule settings are retained as schedule 1 after upgrading. Countdown timers restart from zero when the device reboots.
 - Brightness, power state, and the last non-off color mode are saved in flash. After a reboot the lamp starts off, then restores the previous on state after a three-second safety delay. A lamp that was off remains off.
 - When an automation turns the lamp on, it restores the most recently selected warm, balanced, or cool mode.
 

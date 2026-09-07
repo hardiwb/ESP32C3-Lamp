@@ -34,9 +34,6 @@ static uint16_t warm_level;
 static uint16_t cool_level;
 static uint16_t master_brightness = 700;
 static char lamp_mode[5] = "off";
-static bool schedule_enabled;
-static uint16_t schedule_on_minute = 7 * 60;
-static uint16_t schedule_off_minute = 22 * 60;
 static int64_t timer_deadline_us;
 static bool timer_turn_on;
 static char resume_mode[5] = "warm";
@@ -48,6 +45,19 @@ static const char *clock_source = "none";
 #define WIFI_MAX_RETRY 10
 #define LAMP_MAX_DUTY ((1U << LAMP_PWM_RESOLUTION_BITS) - 1U)
 #define LAMP_FADE_TIME_MS 1000
+#define SCHEDULE_COUNT 3
+
+typedef struct {
+    bool enabled;
+    uint16_t on_minute;
+    uint16_t off_minute;
+} daily_schedule_t;
+
+static daily_schedule_t schedules[SCHEDULE_COUNT] = {
+    {.enabled = false, .on_minute = 7 * 60, .off_minute = 22 * 60},
+    {.enabled = false, .on_minute = 7 * 60, .off_minute = 22 * 60},
+    {.enabled = false, .on_minute = 7 * 60, .off_minute = 22 * 60},
+};
 
 enum {
     PWM_MODE_WARM = 0,
@@ -186,15 +196,17 @@ static const char INDEX_HTML[] =
     "h1,h2{margin:0 0 14px;line-height:1.15}h1{font-size:2rem}h2{font-size:1.55rem}p{margin:10px 0 16px}"
     "button{font:inherit;border:1px solid #a87945;background:#fff;padding:10px 14px;border-radius:8px;cursor:pointer}button.active{background:#a87945;color:white}"
     "input,select{font:inherit;width:100%;padding:8px;accent-color:#a87945}input[type=range]{padding:0}.mode-buttons,.actions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}"
-    ".row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.inline{display:flex;gap:8px;align-items:center;margin-bottom:10px}.inline input{width:auto}"
+    ".row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.inline{display:flex;gap:8px;align-items:center;margin-bottom:10px}.inline input{width:auto}.schedule-slot{padding:12px 0}.schedule-slot+.schedule-slot{border-top:1px solid #e7dfd3}.schedule-slot .inline{font-weight:600}"
     "#brightness{margin-top:4px}#firmware input{margin:6px 0 14px}#ota-status,#status,#timer-status,#clock{color:#6f665d}#clock{margin-top:0}"
     "@media(min-width:800px){main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:32px}.panel:nth-child(2){border-top:0}.panel:nth-child(n+3){border-top:1px solid #ded5c6}}"
     "@media(max-width:520px){.row{grid-template-columns:1fr}body{margin-top:8px}main{padding:4px 16px}}</style></head>"
     "<body><main><section class=panel id=lamp-control><h1>Desk Lamp</h1><p>Choose the light temperature.</p>"
     "<div class=mode-buttons><button data-mode=off>Off</button><button data-mode=warm>Warm</button><button data-mode=mix>Balanced</button><button data-mode=cool>Cool</button></div>"
     "<label for=brightness>Brightness</label><input id=brightness type=range min=0 max=100 step=5 value=70><p id=status>Loading...</p></section>"
-    "<section class=panel id=schedule><h2>Daily schedule</h2><p id=clock>Synchronizing...</p><label class=inline><input id=schedule-enabled type=checkbox> Enabled</label><div class=row>"
-    "<label>Turn on<input id=schedule-on type=time value=07:00></label><label>Turn off<input id=schedule-off type=time value=22:00></label></div>"
+    "<section class=panel id=schedule><h2>Daily schedules</h2><p id=clock>Synchronizing...</p>"
+    "<div class=schedule-slot><label class=inline><input id=schedule-1-enabled type=checkbox> Schedule 1</label><div class=row><label>Turn on<input id=schedule-1-on type=time value=07:00></label><label>Turn off<input id=schedule-1-off type=time value=22:00></label></div></div>"
+    "<div class=schedule-slot><label class=inline><input id=schedule-2-enabled type=checkbox> Schedule 2</label><div class=row><label>Turn on<input id=schedule-2-on type=time value=07:00></label><label>Turn off<input id=schedule-2-off type=time value=22:00></label></div></div>"
+    "<div class=schedule-slot><label class=inline><input id=schedule-3-enabled type=checkbox> Schedule 3</label><div class=row><label>Turn on<input id=schedule-3-on type=time value=07:00></label><label>Turn off<input id=schedule-3-off type=time value=22:00></label></div></div>"
     "<div class=actions><button id=schedule-save>Save schedule</button></div></section>"
     "<section class=panel id=timer><h2>Timer</h2><div class=row><label>Minutes<input id=timer-minutes type=number min=1 max=1440 value=30></label>"
     "<label>Action<select id=timer-action><option value=off>Turn off</option><option value=on>Turn on</option></select></label></div>"
@@ -208,11 +220,11 @@ static const char INDEX_HTML[] =
     "slider.oninput=()=>status.textContent='Brightness '+slider.value+'%';slider.onchange=()=>update({brightness:Math.round(Number(slider.value)*10.23)});"
     "let scheduleDirty=false;async function automation(data){await fetch('/api/automation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});await refreshAutomation(true)}"
     "async function refreshAutomation(force=false){try{let r=await fetch('/api/automation'),a=await r.json();clock.textContent=a.synced?a.local_time+' ('+a.timezone+', '+(a.source==='rtc'?'RTC':'internet')+')':'Waiting for RTC or internet time...';"
-    "if(force||!scheduleDirty){document.querySelector('#schedule-enabled').checked=a.schedule.enabled;document.querySelector('#schedule-on').value=a.schedule.on;document.querySelector('#schedule-off').value=a.schedule.off}"
+    "if(force||!scheduleDirty)a.schedules.forEach((s,i)=>{let n=i+1;document.querySelector('#schedule-'+n+'-enabled').checked=s.enabled;document.querySelector('#schedule-'+n+'-on').value=s.on;document.querySelector('#schedule-'+n+'-off').value=s.off});"
     "if(a.timer.active){let m=Math.floor(a.timer.remaining_seconds/60),s=a.timer.remaining_seconds%60;timerStatus.textContent='Will turn '+a.timer.action+' in '+m+':'+String(s).padStart(2,'0')}else timerStatus.textContent='No active timer'}catch(e){clock.textContent='Clock unavailable'}}"
     "document.querySelector('#timer-set').onclick=()=>automation({timer_minutes:Number(document.querySelector('#timer-minutes').value),timer_action:document.querySelector('#timer-action').value});"
-    "document.querySelector('#timer-cancel').onclick=()=>automation({cancel_timer:true});document.querySelectorAll('#schedule-enabled,#schedule-on,#schedule-off').forEach(e=>e.onchange=()=>scheduleDirty=true);"
-    "document.querySelector('#schedule-save').onclick=async()=>{await automation({schedule_enabled:document.querySelector('#schedule-enabled').checked,schedule_on:document.querySelector('#schedule-on').value,schedule_off:document.querySelector('#schedule-off').value});scheduleDirty=false};"
+    "document.querySelector('#timer-cancel').onclick=()=>automation({cancel_timer:true});document.querySelectorAll('.schedule-slot input').forEach(e=>e.onchange=()=>scheduleDirty=true);"
+    "document.querySelector('#schedule-save').onclick=async()=>{let d={};for(let n=1;n<=3;n++){d['schedule_'+n+'_enabled']=document.querySelector('#schedule-'+n+'-enabled').checked;d['schedule_'+n+'_on']=document.querySelector('#schedule-'+n+'-on').value;d['schedule_'+n+'_off']=document.querySelector('#schedule-'+n+'-off').value}await automation(d);scheduleDirty=false};"
     "document.querySelector('#ota-button').onclick=()=>{let f=document.querySelector('#ota-file').files[0],s=document.querySelector('#ota-status'),b=document.querySelector('#ota-button');"
     "if(!f){s.textContent='Choose a firmware file first.';return}if(!confirm('Install '+f.name+' and restart the lamp?'))return;"
     "b.disabled=true;let x=new XMLHttpRequest;x.open('POST','/api/ota');x.setRequestHeader('Content-Type','application/octet-stream');"
@@ -375,26 +387,36 @@ static void rtc_start(void)
 
 static void schedule_load(void)
 {
+    static const char *enabled_keys[SCHEDULE_COUNT] = {"sched_en", "sched_en2", "sched_en3"};
+    static const char *on_keys[SCHEDULE_COUNT] = {"sched_on", "sched_on2", "sched_on3"};
+    static const char *off_keys[SCHEDULE_COUNT] = {"sched_off", "sched_off2", "sched_off3"};
     nvs_handle_t handle;
     if (nvs_open("lamp", NVS_READONLY, &handle) != ESP_OK) return;
-    uint8_t enabled = 0;
-    nvs_get_u8(handle, "sched_en", &enabled);
-    nvs_get_u16(handle, "sched_on", &schedule_on_minute);
-    nvs_get_u16(handle, "sched_off", &schedule_off_minute);
-    if (schedule_on_minute >= 24 * 60) schedule_on_minute = 7 * 60;
-    if (schedule_off_minute >= 24 * 60) schedule_off_minute = 22 * 60;
-    schedule_enabled = enabled != 0;
+    for (size_t i = 0; i < SCHEDULE_COUNT; i++) {
+        uint8_t enabled = 0;
+        nvs_get_u8(handle, enabled_keys[i], &enabled);
+        nvs_get_u16(handle, on_keys[i], &schedules[i].on_minute);
+        nvs_get_u16(handle, off_keys[i], &schedules[i].off_minute);
+        if (schedules[i].on_minute >= 24 * 60) schedules[i].on_minute = 7 * 60;
+        if (schedules[i].off_minute >= 24 * 60) schedules[i].off_minute = 22 * 60;
+        schedules[i].enabled = enabled != 0;
+    }
     nvs_close(handle);
 }
 
 static esp_err_t schedule_save(void)
 {
+    static const char *enabled_keys[SCHEDULE_COUNT] = {"sched_en", "sched_en2", "sched_en3"};
+    static const char *on_keys[SCHEDULE_COUNT] = {"sched_on", "sched_on2", "sched_on3"};
+    static const char *off_keys[SCHEDULE_COUNT] = {"sched_off", "sched_off2", "sched_off3"};
     nvs_handle_t handle;
     esp_err_t result = nvs_open("lamp", NVS_READWRITE, &handle);
     if (result != ESP_OK) return result;
-    result = nvs_set_u8(handle, "sched_en", schedule_enabled ? 1 : 0);
-    if (result == ESP_OK) result = nvs_set_u16(handle, "sched_on", schedule_on_minute);
-    if (result == ESP_OK) result = nvs_set_u16(handle, "sched_off", schedule_off_minute);
+    for (size_t i = 0; i < SCHEDULE_COUNT && result == ESP_OK; i++) {
+        result = nvs_set_u8(handle, enabled_keys[i], schedules[i].enabled ? 1 : 0);
+        if (result == ESP_OK) result = nvs_set_u16(handle, on_keys[i], schedules[i].on_minute);
+        if (result == ESP_OK) result = nvs_set_u16(handle, off_keys[i], schedules[i].off_minute);
+    }
     if (result == ESP_OK) result = nvs_commit(handle);
     nvs_close(handle);
     return result;
@@ -457,22 +479,32 @@ static void automation_task(void *arg)
             struct tm local;
             localtime_r(&now, &local);
             uint16_t minute = (uint16_t)(local.tm_hour * 60 + local.tm_min);
+            daily_schedule_t current[SCHEDULE_COUNT];
             xSemaphoreTake(state_lock, portMAX_DELAY);
-            bool enabled = schedule_enabled;
-            uint16_t on_minute = schedule_on_minute;
-            uint16_t off_minute = schedule_off_minute;
+            memcpy(current, schedules, sizeof(current));
             xSemaphoreGive(state_lock);
-            if (enabled && on_minute != off_minute) {
-                if (last_schedule_minute < 0) {
-                    bool should_be_on = on_minute < off_minute
-                        ? minute >= on_minute && minute < off_minute
-                        : minute >= on_minute || minute < off_minute;
-                    if (should_be_on) turn_on(); else set_mode("off");
-                } else if (minute == on_minute) {
-                    turn_on();
-                } else if (minute == off_minute) {
-                    set_mode("off");
-                }
+
+            bool any_enabled = false;
+            bool any_active = false;
+            bool turn_on_now = false;
+            bool turn_off_now = false;
+            for (size_t i = 0; i < SCHEDULE_COUNT; i++) {
+                daily_schedule_t *schedule = &current[i];
+                if (!schedule->enabled || schedule->on_minute == schedule->off_minute) continue;
+                any_enabled = true;
+                bool active = schedule->on_minute < schedule->off_minute
+                    ? minute >= schedule->on_minute && minute < schedule->off_minute
+                    : minute >= schedule->on_minute || minute < schedule->off_minute;
+                any_active = any_active || active;
+                turn_on_now = turn_on_now || minute == schedule->on_minute;
+                turn_off_now = turn_off_now || minute == schedule->off_minute;
+            }
+            if (last_schedule_minute < 0 && any_enabled) {
+                if (any_active) turn_on(); else set_mode("off");
+            } else if (turn_on_now) {
+                turn_on();
+            } else if (turn_off_now && !any_active) {
+                set_mode("off");
             }
             last_schedule_minute = epoch_minute;
         }
@@ -509,7 +541,7 @@ static bool json_time(const char *body, const char *key, uint16_t *minute)
 
 static esp_err_t automation_get_handler(httpd_req_t *request)
 {
-    char response[384];
+    char response[640];
     char local_time[40] = "Not synchronized";
     bool synced = clock_is_synced();
     if (synced) {
@@ -524,35 +556,38 @@ static esp_err_t automation_get_handler(httpd_req_t *request)
     xSemaphoreTake(state_lock, portMAX_DELAY);
     int64_t deadline = timer_deadline_us;
     bool timer_on = timer_turn_on;
-    bool enabled = schedule_enabled;
-    uint16_t on_minute = schedule_on_minute;
-    uint16_t off_minute = schedule_off_minute;
+    daily_schedule_t current[SCHEDULE_COUNT];
+    memcpy(current, schedules, sizeof(current));
     xSemaphoreGive(state_lock);
     int64_t remaining = deadline > now_us ? (deadline - now_us + 999999) / 1000000 : 0;
 
     snprintf(response, sizeof(response),
              "{\"synced\":%s,\"source\":\"%s\",\"local_time\":\"%s\",\"timezone\":\"%s\","
              "\"timer\":{\"active\":%s,\"action\":\"%s\",\"remaining_seconds\":%lld},"
-             "\"schedule\":{\"enabled\":%s,\"on\":\"%02u:%02u\",\"off\":\"%02u:%02u\"}}",
+             "\"schedules\":["
+             "{\"enabled\":%s,\"on\":\"%02u:%02u\",\"off\":\"%02u:%02u\"},"
+             "{\"enabled\":%s,\"on\":\"%02u:%02u\",\"off\":\"%02u:%02u\"},"
+             "{\"enabled\":%s,\"on\":\"%02u:%02u\",\"off\":\"%02u:%02u\"}]}",
              synced ? "true" : "false", clock_source, local_time, LAMP_TIMEZONE,
              remaining > 0 ? "true" : "false", timer_on ? "on" : "off", (long long)remaining,
-             enabled ? "true" : "false", on_minute / 60, on_minute % 60,
-             off_minute / 60, off_minute % 60);
+             current[0].enabled ? "true" : "false", current[0].on_minute / 60, current[0].on_minute % 60,
+             current[0].off_minute / 60, current[0].off_minute % 60,
+             current[1].enabled ? "true" : "false", current[1].on_minute / 60, current[1].on_minute % 60,
+             current[1].off_minute / 60, current[1].off_minute % 60,
+             current[2].enabled ? "true" : "false", current[2].on_minute / 60, current[2].on_minute % 60,
+             current[2].off_minute / 60, current[2].off_minute % 60);
     httpd_resp_set_type(request, "application/json");
     return httpd_resp_send(request, response, HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t automation_post_handler(httpd_req_t *request)
 {
-    char body[384];
+    char body[640];
     int received = httpd_req_recv(request, body, sizeof(body) - 1);
     if (received <= 0) return ESP_FAIL;
     body[received] = '\0';
 
     bool cancel;
-    bool enabled;
-    uint16_t on_minute;
-    uint16_t off_minute;
     bool schedule_changed = false;
     if (json_bool(body, "\"cancel_timer\"", &cancel) && cancel) {
         xSemaphoreTake(state_lock, portMAX_DELAY);
@@ -580,17 +615,25 @@ static esp_err_t automation_post_handler(httpd_req_t *request)
     }
 
     xSemaphoreTake(state_lock, portMAX_DELAY);
-    if (json_bool(body, "\"schedule_enabled\"", &enabled)) {
-        schedule_enabled = enabled;
-        schedule_changed = true;
-    }
-    if (json_time(body, "\"schedule_on\"", &on_minute)) {
-        schedule_on_minute = on_minute;
-        schedule_changed = true;
-    }
-    if (json_time(body, "\"schedule_off\"", &off_minute)) {
-        schedule_off_minute = off_minute;
-        schedule_changed = true;
+    for (size_t i = 0; i < SCHEDULE_COUNT; i++) {
+        char key[32];
+        bool enabled;
+        uint16_t minute;
+        snprintf(key, sizeof(key), "\"schedule_%u_enabled\"", (unsigned)(i + 1));
+        if (json_bool(body, key, &enabled)) {
+            schedules[i].enabled = enabled;
+            schedule_changed = true;
+        }
+        snprintf(key, sizeof(key), "\"schedule_%u_on\"", (unsigned)(i + 1));
+        if (json_time(body, key, &minute)) {
+            schedules[i].on_minute = minute;
+            schedule_changed = true;
+        }
+        snprintf(key, sizeof(key), "\"schedule_%u_off\"", (unsigned)(i + 1));
+        if (json_time(body, key, &minute)) {
+            schedules[i].off_minute = minute;
+            schedule_changed = true;
+        }
     }
     xSemaphoreGive(state_lock);
     if (schedule_changed && schedule_save() != ESP_OK) {
