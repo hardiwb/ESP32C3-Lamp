@@ -11,6 +11,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_ota_ops.h"
+#include "esp_sleep.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -192,29 +193,30 @@ static void pwm_init(void)
 static const char INDEX_HTML[] =
     "<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
     "<title>Desk Lamp</title><style>*{box-sizing:border-box}body{font-family:system-ui,sans-serif;max-width:1000px;margin:20px auto;padding:0 16px;background:#f4efe6;color:#25231f}"
-    "main{background:#fffaf2;padding:4px 24px;border:1px solid #ded5c6;border-radius:12px;box-shadow:0 8px 24px #6b59421c}.panel{min-width:0;padding:22px 0}.panel+.panel{border-top:1px solid #ded5c6}"
+    "main{background:#fffaf2;padding:4px 24px;border:1px solid #ded5c6;border-radius:12px;box-shadow:0 8px 24px #6b59421c}.column{min-width:0}.panel{min-width:0;padding:22px 0}.panel+.panel{border-top:1px solid #ded5c6}"
     "h1,h2{margin:0 0 14px;line-height:1.15}h1{font-size:2rem}h2{font-size:1.55rem}p{margin:10px 0 16px}"
     "button{font:inherit;border:1px solid #a87945;background:#fff;padding:10px 14px;border-radius:8px;cursor:pointer}button.active{background:#a87945;color:white}"
     "input,select{font:inherit;width:100%;padding:8px;accent-color:#a87945}input[type=range]{padding:0}.mode-buttons,.actions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}"
     ".row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.inline{display:flex;gap:8px;align-items:center;margin-bottom:10px}.inline input{width:auto}.schedule-slot{padding:12px 0}.schedule-slot+.schedule-slot{border-top:1px solid #e7dfd3}.schedule-slot .inline{font-weight:600}"
     "#brightness{margin-top:4px}#firmware input{margin:6px 0 14px}#ota-status,#status,#timer-status,#clock{color:#6f665d}#clock{margin-top:0}"
-    "@media(min-width:800px){main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:32px}.panel:nth-child(2){border-top:0}.panel:nth-child(n+3){border-top:1px solid #ded5c6}}"
+    "@media(min-width:800px){main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:32px;align-items:start}}"
     "@media(max-width:520px){.row{grid-template-columns:1fr}body{margin-top:8px}main{padding:4px 16px}}</style></head>"
-    "<body><main><section class=panel id=lamp-control><h1>Desk Lamp</h1><p>Choose the light temperature.</p>"
+    "<body><main><div class=column><section class=panel id=lamp-control><h1>Desk Lamp</h1><p>Choose the light temperature.</p>"
     "<div class=mode-buttons><button data-mode=off>Off</button><button data-mode=warm>Warm</button><button data-mode=mix>Balanced</button><button data-mode=cool>Cool</button></div>"
-    "<label for=brightness>Brightness</label><input id=brightness type=range min=0 max=100 step=5 value=70><p id=status>Loading...</p></section>"
-    "<section class=panel id=schedule><h2>Daily schedules</h2><p id=clock>Synchronizing...</p>"
-    "<div class=schedule-slot><label class=inline><input id=schedule-1-enabled type=checkbox> Schedule 1</label><div class=row><label>Turn on<input id=schedule-1-on type=time value=07:00></label><label>Turn off<input id=schedule-1-off type=time value=22:00></label></div></div>"
-    "<div class=schedule-slot><label class=inline><input id=schedule-2-enabled type=checkbox> Schedule 2</label><div class=row><label>Turn on<input id=schedule-2-on type=time value=07:00></label><label>Turn off<input id=schedule-2-off type=time value=22:00></label></div></div>"
-    "<div class=schedule-slot><label class=inline><input id=schedule-3-enabled type=checkbox> Schedule 3</label><div class=row><label>Turn on<input id=schedule-3-on type=time value=07:00></label><label>Turn off<input id=schedule-3-off type=time value=22:00></label></div></div>"
-    "<div class=actions><button id=schedule-save>Save schedule</button></div></section>"
+    "<label for=brightness>Brightness</label><input id=brightness type=range min=0 max=100 step=1 value=70><p id=status>Loading...</p></section>"
     "<section class=panel id=timer><h2>Timer</h2><div class=row><label>Minutes<input id=timer-minutes type=number min=1 max=1440 value=30></label>"
     "<label>Action<select id=timer-action><option value=off>Turn off</option><option value=on>Turn on</option></select></label></div>"
     "<div class=actions><button id=timer-set>Start timer</button><button id=timer-cancel>Cancel</button></div><p id=timer-status>No active timer</p></section>"
     "<section class=panel id=firmware><h2>Firmware update</h2><p>Select a firmware .bin built for this device.</p>"
-    "<input id=ota-file type=file accept='.bin,application/octet-stream'><div class=actions><button id=ota-button>Install update</button></div><p id=ota-status></p></section>"
+    "<input id=ota-file type=file accept='.bin,application/octet-stream'><div class=actions><button id=ota-button>Install update</button></div><p id=ota-status></p></section></div>"
+    "<div class=column><section class=panel id=schedule><h2>Daily schedules</h2><p id=clock>Synchronizing...</p>"
+    "<div class=schedule-slot><label class=inline><input id=schedule-1-enabled type=checkbox> Schedule 1</label><div class=row><label>Turn on<input id=schedule-1-on type=time value=07:00></label><label>Turn off<input id=schedule-1-off type=time value=22:00></label></div></div>"
+    "<div class=schedule-slot><label class=inline><input id=schedule-2-enabled type=checkbox> Schedule 2</label><div class=row><label>Turn on<input id=schedule-2-on type=time value=07:00></label><label>Turn off<input id=schedule-2-off type=time value=22:00></label></div></div>"
+    "<div class=schedule-slot><label class=inline><input id=schedule-3-enabled type=checkbox> Schedule 3</label><div class=row><label>Turn on<input id=schedule-3-on type=time value=07:00></label><label>Turn off<input id=schedule-3-off type=time value=22:00></label></div></div>"
+    "<div class=actions><button id=schedule-save>Save schedule</button><button id=deep-sleep>Sleep until next schedule</button></div>"
+    "<p>Deep sleep turns everything off and wakes at the next enabled start time. Replug power to wake it early.</p></section></div>"
     "</main><script>const status=document.querySelector('#status'),slider=document.querySelector('#brightness'),clock=document.querySelector('#clock'),timerStatus=document.querySelector('#timer-status');"
-    "async function refresh(){let r=await fetch('/api/state'),s=await r.json();let percent=Math.round(s.brightness/10.23/5)*5;slider.value=percent;status.textContent=s.mode+' / '+percent+'%';document.querySelectorAll('button[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===s.mode))}"
+    "async function refresh(){let r=await fetch('/api/state'),s=await r.json();let percent=Math.round(s.brightness/10.23);slider.value=percent;status.textContent=s.mode+' / '+percent+'%';document.querySelectorAll('button[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===s.mode))}"
     "async function update(data){await fetch('/api/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});refresh()}"
     "document.querySelectorAll('button[data-mode]').forEach(b=>b.onclick=()=>update({mode:b.dataset.mode}));"
     "slider.oninput=()=>status.textContent='Brightness '+slider.value+'%';slider.onchange=()=>update({brightness:Math.round(Number(slider.value)*10.23)});"
@@ -225,6 +227,7 @@ static const char INDEX_HTML[] =
     "document.querySelector('#timer-set').onclick=()=>automation({timer_minutes:Number(document.querySelector('#timer-minutes').value),timer_action:document.querySelector('#timer-action').value});"
     "document.querySelector('#timer-cancel').onclick=()=>automation({cancel_timer:true});document.querySelectorAll('.schedule-slot input').forEach(e=>e.onchange=()=>scheduleDirty=true);"
     "document.querySelector('#schedule-save').onclick=async()=>{let d={};for(let n=1;n<=3;n++){d['schedule_'+n+'_enabled']=document.querySelector('#schedule-'+n+'-enabled').checked;d['schedule_'+n+'_on']=document.querySelector('#schedule-'+n+'-on').value;d['schedule_'+n+'_off']=document.querySelector('#schedule-'+n+'-off').value}await automation(d);scheduleDirty=false};"
+    "document.querySelector('#deep-sleep').onclick=async function(){if(scheduleDirty){clock.textContent='Save the schedule before sleeping.';return}if(!confirm('Sleep until the next enabled schedule starts? You can replug power to wake early.'))return;this.disabled=true;try{let r=await fetch('/api/sleep',{method:'POST'});if(!r.ok)throw Error(await r.text());let s=await r.json(),m=Math.floor(s.wake_seconds/60);clock.textContent='Sleeping until the next schedule (in about '+m+' minute'+(m===1?'':'s')+').'}catch(e){clock.textContent='Could not enter deep sleep: '+e.message;this.disabled=false}};"
     "document.querySelector('#ota-button').onclick=()=>{let f=document.querySelector('#ota-file').files[0],s=document.querySelector('#ota-status'),b=document.querySelector('#ota-button');"
     "if(!f){s.textContent='Choose a firmware file first.';return}if(!confirm('Install '+f.name+' and restart the lamp?'))return;"
     "b.disabled=true;let x=new XMLHttpRequest;x.open('POST','/api/ota');x.setRequestHeader('Content-Type','application/octet-stream');"
@@ -673,6 +676,75 @@ static void ota_restart_task(void *arg)
     esp_restart();
 }
 
+static bool next_schedule_delay(uint64_t *delay_seconds)
+{
+    if (!clock_is_synced()) return false;
+
+    daily_schedule_t current[SCHEDULE_COUNT];
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    memcpy(current, schedules, sizeof(current));
+    xSemaphoreGive(state_lock);
+
+    time_t now;
+    struct tm local;
+    time(&now);
+    localtime_r(&now, &local);
+    int now_second = local.tm_hour * 3600 + local.tm_min * 60 + local.tm_sec;
+    uint64_t nearest = UINT64_MAX;
+    for (size_t i = 0; i < SCHEDULE_COUNT; i++) {
+        if (!current[i].enabled || current[i].on_minute == current[i].off_minute) continue;
+        int candidate = current[i].on_minute * 60 - now_second;
+        if (candidate <= 0) candidate += 24 * 60 * 60;
+        if ((uint64_t)candidate < nearest) nearest = (uint64_t)candidate;
+    }
+    if (nearest == UINT64_MAX) return false;
+    *delay_seconds = nearest;
+    return true;
+}
+
+static void deep_sleep_task(void *arg)
+{
+    uint64_t wakeup_us = *(uint64_t *)arg;
+    free(arg);
+    vTaskDelay(pdMS_TO_TICKS(LAMP_FADE_TIME_MS + 500));
+    ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(wakeup_us));
+    ESP_LOGI(TAG, "entering deep sleep for %llu seconds", (unsigned long long)(wakeup_us / 1000000));
+    esp_deep_sleep_start();
+}
+
+static esp_err_t sleep_post_handler(httpd_req_t *request)
+{
+    uint64_t delay_seconds;
+    if (!next_schedule_delay(&delay_seconds)) {
+        httpd_resp_set_status(request, "400 Bad Request");
+        return httpd_resp_sendstr(request, "Synchronize the clock and enable at least one valid schedule first");
+    }
+
+    set_mode("off");
+    esp_err_t save_result = state_save();
+    if (save_result != ESP_OK) {
+        ESP_LOGW(TAG, "could not save off state before deep sleep: %s", esp_err_to_name(save_result));
+    }
+
+    uint64_t *wakeup_us = malloc(sizeof(*wakeup_us));
+    if (wakeup_us == NULL) {
+        httpd_resp_set_status(request, "500 Internal Server Error");
+        return httpd_resp_sendstr(request, "Could not prepare deep sleep");
+    }
+    *wakeup_us = delay_seconds * 1000000ULL;
+    if (xTaskCreate(deep_sleep_task, "deep_sleep", 2048, wakeup_us, 5, NULL) != pdPASS) {
+        free(wakeup_us);
+        ESP_LOGE(TAG, "could not create deep sleep task");
+        httpd_resp_set_status(request, "500 Internal Server Error");
+        return httpd_resp_sendstr(request, "Could not start deep sleep");
+    }
+    char response[64];
+    snprintf(response, sizeof(response), "{\"ok\":true,\"wake_seconds\":%llu}",
+             (unsigned long long)delay_seconds);
+    httpd_resp_set_type(request, "application/json");
+    return httpd_resp_sendstr(request, response);
+}
+
 static esp_err_t ota_error(httpd_req_t *request, const char *message)
 {
     ESP_LOGE(TAG, "OTA update failed: %s", message);
@@ -751,12 +823,14 @@ static void http_server_start(void)
     httpd_uri_t state_post_uri = {.uri = "/api/state", .method = HTTP_POST, .handler = state_post_handler};
     httpd_uri_t automation_get_uri = {.uri = "/api/automation", .method = HTTP_GET, .handler = automation_get_handler};
     httpd_uri_t automation_post_uri = {.uri = "/api/automation", .method = HTTP_POST, .handler = automation_post_handler};
+    httpd_uri_t sleep_post_uri = {.uri = "/api/sleep", .method = HTTP_POST, .handler = sleep_post_handler};
     httpd_uri_t ota_post_uri = {.uri = "/api/ota", .method = HTTP_POST, .handler = ota_post_handler};
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &index_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &state_get_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &state_post_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &automation_get_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &automation_post_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &sleep_post_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_post_uri));
 }
 

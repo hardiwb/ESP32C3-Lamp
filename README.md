@@ -14,11 +14,11 @@ ESP32 connections:
 
 | ESP32 pin | Connection |
 | --- | --- |
-| GPIO4 | Warm optocoupler input LED through its resistor |
-| GPIO5 | Cool optocoupler input LED through its resistor |
-| GPIO6 | DS1302 CLK |
-| GPIO7 | DS1302 DAT |
-| GPIO10 | DS1302 RST/CE |
+| GPIO6 | Warm optocoupler input LED through its resistor |
+| GPIO7 | Cool optocoupler input LED through its resistor |
+| GPIO3 | DS1302 CLK |
+| GPIO4 | DS1302 DAT |
+| GPIO1 | DS1302 RST/CE |
 | 3.3V | DS1302 VCC |
 | GND | Optocoupler input-side ground |
 
@@ -52,6 +52,7 @@ The DS1302 module must be powered from 3.3 V. Its trickle charger is explicitly 
 
 - A countdown timer can turn the lamp on or off after 1–1440 minutes.
 - Three independent daily schedules can turn the lamp on and off at selected local times. Each schedule can be enabled separately, and overlapping schedules keep the lamp on until the last active period ends.
+- The web page can put the controller into deep sleep until the next enabled schedule starts. Replug power or reset the board to wake it early. The action requires a synchronized clock and at least one enabled schedule.
 - Schedule settings are saved in flash and survive restarts. Existing single-schedule settings are retained as schedule 1 after upgrading. Countdown timers restart from zero when the device reboots.
 - Brightness, power state, and the last non-off color mode are saved in flash. After a reboot the lamp starts off, then restores the previous on state after a three-second safety delay. A lamp that was off remains off.
 - When an automation turns the lamp on, it restores the most recently selected warm, balanced, or cool mode.
@@ -71,6 +72,7 @@ The custom partition table keeps two application slots; the update is written to
 
 - `GET /api/state` returns the current mode and brightness.
 - `POST /api/state` accepts JSON such as `{"mode":"warm"}` or `{"brightness":450}`.
+- `POST /api/sleep` turns the lamp off and sleeps until the next enabled schedule starts.
 - `POST /api/ota` accepts a raw ESP32 application `.bin` and restarts into it after validation.
 - The root page serves the browser control panel.
 
